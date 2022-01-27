@@ -19,10 +19,10 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 options(scipen = 999)
 ```
 
-This tutorial aims to introduce interested researchers and students to multiverse analysis. It demonstrates how to implement a multiverse analysis in R using the analysis from [Authors (2021) "If you have all the choices, why not choose (and share) all of them?]().
+This tutorial aims to introduce interested researchers and students to multiverse analysis. It demonstrates how to implement a multiverse analysis in R using the analysis from [Pipal et al. (2022) "If you have all the choices, why not choose (and share) all of them?]().
 
 
-The repository can be found at: [https://github.com/anonymous-researcher1899/multiverse-tutorial](https://github.com/anonymous-researcher1899/multiverse-tutorial). This tutorial is work in progress, there you can always find the up-to-date version. 
+The repository can be found at: [https://github.com/cpipal/multiverse-tutorial](https://github.com/cpipal/multiverse-tutorial). This tutorial is work in progress, there you can always find the up-to-date version. 
 ```{r, include = FALSE}
 # load packages
 if (!require(tidyverse)) {
@@ -74,7 +74,7 @@ Research question: Which content characteristics of news articles determine soci
 
 ## The dataset
 
-In this tutorial we will work with the dataset compiled by [Authors (2021)](). It builds on the [useNews](https://osf.io/uzca3/) dataset, and contains information on news article content characteristics as well as the engagement metrics that news article received on Facebook once it got posted by the FB page of the respective news outlet. To speed up the process of running the multiverse of analyses, we will work with a sample of this data (n=5000) and a subset of the model specifications presented in [Authors (2021)](). 
+In this tutorial we will work with the dataset compiled by [Pipal et al. (2022)](). It builds on the [useNews](https://osf.io/uzca3/) dataset, and contains information on news article content characteristics as well as the engagement metrics that news article received on Facebook once it got posted by the FB page of the respective news outlet. To speed up the process of running the multiverse of analyses, we will work with a sample of this data (n=5000) and a subset of the model specifications presented in [[Pipal et al. (2022)](). 
 
 ## Define reasonable specifications 
 
