@@ -1,0 +1,986 @@
+---
+title: "Multiverse Tutorial"
+output:
+  html_document:
+    css: style.css
+    code_folding: show
+    df_print: paged
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+options(scipen = 999)
+```
+
+This tutorial aims to introduce interested researchers and students to multiverse analysis. It demonstrates how to implement a multiverse analysis in R using the analysis from [Authors (2021) "If you have all the choices, why not choose (and share) all of them?]().
+
+
+The repository can be found at: [https://github.com/anonymous-researcher1899/multiverse-tutorial](https://github.com/anonymous-researcher1899/multiverse-tutorial). This tutorial is work in progress, there you can always find the up-to-date version. 
+```{r, include = FALSE}
+# load packages
+if (!require(tidyverse)) {
+  install.packages('tidyverse')
+}
+if (!require(multiverse)) {
+  install.packages('multiverse')
+}
+if (!require(purrr)) {
+  install.packages('purrr')
+}
+if (!require(broom)) {
+  install.packages('broom')
+}
+if (!require(cowplot)) {
+  install.packages('cowplot')
+}
+if (!require(combinat)) {
+  install.packages('combinat')
+}
+if (!require(igraph)) {
+  install.packages('igraph')
+}
+if (!require(ggraph)) {
+  install.packages('ggraph')
+}
+if (!require(devtools)) {
+  install.packages('devtools')
+}
+devtools::install_github("masurp/specr") 
+library(specr)
+if (!require(multiverse)) {
+  install.packages('multiverse')
+}
+```
+# Introduction
+
+There are many different ways to test a given association and researchers usually only report one or a few model specifications. Model selection relies on our choices as researchers. These choices are often arbitrary and might be implicitly driven by a desire for significant results.
+
+Given the same dataset, two researchers might choose to answer the same question in very different ways, e.g. using different variables to operationalize a latent construct, choose different functional forms, etc. [Silberzahn et al. (2018)](http://econweb.umd.edu/~pope/crowdsourcing_paper.pdf) demonstrate this problem by showing how different reserach teams come to different conclusions about the relationship between football players' skin colour and them receiving a red card.
+
+[Steegen  et al. 2016](https://journals.sagepub.com/doi/10.1177/1745691616658637) propose to solve this problem by specifying all "reasonable" models to show how robust the findings are.
+
+The goal of this tutorial is to help interested researchers and students getting started with multiverse analyses. We will demonstrate the implementation of the multiverse analysis using 3 different solutions: coding it from scratch by looping over the grid of options, using the R package [specr](https://cran.r-project.org/web/packages/specr/index.html), and using the R package [multiverse](https://cran.r-project.org/web/packages/specr/index.html).
+
+# How to Do a Multiverse Analysis in R
+
+Research question: Which content characteristics of news articles determine social media engagement with the respective article? 
+
+## The dataset
+
+In this tutorial we will work with the dataset compiled by [Authors (2021)](). It builds on the [useNews](https://osf.io/uzca3/) dataset, and contains information on news article content characteristics as well as the engagement metrics that news article received on Facebook once it got posted by the FB page of the respective news outlet. To speed up the process of running the multiverse of analyses, we will work with a sample of this data (n=5000) and a subset of the model specifications presented in [Authors (2021)](). 
+
+## Define reasonable specifications 
+
+For this tutorial we use the number of times a FB post of a news article got shared as the dependent variable. As independent variables we include the sentiment of the news article, and control for the arousal, complexity, and main topic of the article. We also include some variables that are the same across all instances of the multiverse: the media outlet posting the article, the length of the article, and the year the article was posted.
+
+The first step is to define the multiverse of analytical decisions. We therefore first list the differnt operationalizations of the included variables. Ech combination of operationalization gives rise to a differnt dataset. The sum of these datasets is the multiverse of datasets.
+
+DV "Shares":
+
+* `shares_log` = logged number of shares of FB post
+
+IV "sentiment": We use 6 different measures of sentiment, resulting from using 3 different dictionaries (LIWC, Lexicoder, NRC) and 2 ways of combining dictionary word hits into a sentiment score (difference vs. logged ratio).
+
+* `sentiment_liwc1` = LIWC dictionary (difference)
+* `sentiment_liwc2` = LIWC dictionary (logged ratio)
+* `sentiment_lsd1` =  Lexicoder dictionary (difference)
+* `sentiment_lsd2` = Lexicoder dictionary (logged ratio)
+* `sentiment_nrc1` = NRC dictionary (difference)
+* `sentiment_nrc2` = NRC dictionary (logged ratio)
+
+Control "arousal": We use 3 different measures of arousal, resulting from the 3 different sentiment dictionaries that were already used to construct the sentiment measure.
+
+* `arousal_liwc1` = LIWC dictionary (sum)
+* `arousal_lsd1` = Lexicoder dictionary (sum)
+* `arousal_nrc1` = LSD dictionary (sum)
+
+Control "complexity": We use 3 different measures of textual complexity. These are rather crude measures of complexity, namely lexical diversity.
+
+* `complexity1` = Type-Token Ratio (logged)
+* `complexity2` = Carroll’s Corrected TTR (logged)
+* `complexity3` = Dugast’s Uber Index (logged)
+
+Control "topics": This variable indicates the main topic a news article is about. There are four different topic variables, resulting from 4 different pre-processing choices of the news article DFM.
+
+* `topics_option1` = no stemming or trimming of DFM
+* `topics_option2` = trimming of DFM
+* `topics_option3` = stemming of DFM
+* `topics_option4` = stemming and trimming of DFM
+
+Controls that don't change:
+
+* `media` = news outlet
+* `tokens` = article length
+* `year1` = year of FB post
+
+
+Modeling: 
+
+* `OLS`: We will use one OLS model
+
+Keep in mind that we standardize all continuous variables.
+
+Load the dataset into the work environment and standardize variables:
+```{r}
+df = read_rds("dataset_sample.rds")
+
+df <- df %>% 
+  tidylog::mutate(sentiment_liwc1 = scale(sentiment_liwc1),
+                  sentiment_liwc2 = scale(sentiment_liwc2),
+                  sentiment_lsd1 = scale(sentiment_lsd1),
+                  sentiment_lsd2 = scale(sentiment_lsd2),
+                  sentiment_nrc1 = scale(sentiment_nrc1),
+                  sentiment_nrc2 = scale(sentiment_nrc2),
+                  arousal_liwc1 = scale(arousal_liwc1),
+                  arousal_lsd1 = scale(arousal_lsd1),
+                  arousal_nrc1 = scale(arousal_nrc1),
+                  complexity1 = scale(log(complexity1)),
+                  complexity2 = scale(log(complexity2)),
+                  complexity3 = scale(log(complexity3)),
+                  arousal_liwc1 = scale(arousal_liwc1),
+                  arousal_lsd1 = scale(arousal_lsd1),
+                  arousal_nrc1 = scale(arousal_nrc1),
+                  year = as.factor(year1),
+                  media = as.factor(media),
+                  length = log(ntokens))
+                  
+                  
+
+
+```
+
+
+## Option A: Using [specr](https://cran.r-project.org/web/packages/specr/index.html)
+
+[specr](https://cran.r-project.org/web/packages/specr/index.html) is a fantastic package to run multiverse analyses. It is very easy to use, and comes with built in functions to visualize and inspect the results. The downside is that it currently does not handle different operatinalizations of control variables (e.g. specify to not run a model that includes different version of the same control variable). We also cannot specify control flows (e.g. everytime we use the LIWC dictionary for the measurement of sentiment, we don't want to run models that would use the NRC option for the arousal control variable).
+```{r}
+library(specr)
+```
+
+If your analysis needs are met by the options that specr gives you, go ahead and use it! It's the most straightforward implementation of doing a multiverse analysis in R. You can find detailed tutorials on how to use the [specr](https://cran.r-project.org/web/packages/specr/index.html) package [here](https://masurp.github.io/specr/).
+
+[specr](https://cran.r-project.org/web/packages/specr/index.html) is very easy to use. All analysis are run with the command `run_specr`, and all you have to specify are:
+
+* `df` = the dataset you want to use
+* `y` = the dependent variable(s) to include
+* `x` = the independent variable(s) to include
+* `models` = the model(s) to run
+* `controls` = the control variables to include
+
+The function then does all the rest, creating datasets from the included variables and running the model(s). 
+```{r}
+results_specr = specr::run_specs(df = df,
+                         y = c("shares_log"), 
+                         x = c("sentiment_liwc1", "sentiment_liwc2",
+                               "sentiment_lsd1", "sentiment_lsd2",
+                               "sentiment_nrc1", "sentiment_nrc2"),
+                         model = c("lm"), 
+                         controls = c("arousal_liwc1", "arousal_lsd1", "arousal_nrc1",
+                                      "complexity1", "complexity2", "complexity3",
+                                      "topics1", "topics2", "topics3", "topics4",
+                                      "media", "year", "length"), 
+                         subsets = NULL)
+```
+The function returns a tibble which we can have a look at:
+```{r}
+results_specr %>% head()
+```
+Each row in this tibble contains the results from a single, including information on what dependent variable, indepenedent variable, and control variable was used. A better way to display the sum of results is to present them visually in the form of a specification curve (estimates ordered by magnitude). [specr](https://cran.r-project.org/web/packages/specr/index.html) provides a function to do just that: `plot_specs`.  
+```{r}
+specr::plot_specs(results_specr, choices = c("x", "y", "controls"))
+```
+<br>
+Whoops, we have a problem. Let's recode one of the values of the `controls` variable in the results tibble for a nicer visual display:
+```{r}
+results_specr <- results_specr %>% 
+  tidylog::mutate(controls = recode(controls,
+                         "arousal_liwc1 + arousal_lsd1 + arousal_nrc1 + complexity1 + complexity2 + complexity3 + topics1 + topics2 + topics3 + topics4 + media + year + length" = "all controls"))
+```
+Now we can display the results nicely using `plot_specs`:
+```{r}
+specr::plot_specs(results_specr)
+```
+<br>
+As you can see in the figure, [specr](https://cran.r-project.org/web/packages/specr/index.html), by default, includes one control variable at a time, plus a full model with all control variables. It also treats all specified controls as variables on its own, hence the final model includes all 3 measures of arousal, all 3 measures of complexity, ... , in one single model. 
+
+This means that it's a bit tricky to use [specr](https://cran.r-project.org/web/packages/specr/index.html) if you want to run models with different operationalizations of control variables, only want to include specific control variables, etc. If you need that, have a look at the next section!
+
+
+
+## Option B: Using [multiverse](https://cran.rstudio.com/web/packages/multiverse/index.html)
+
+The [multiverse](https://cran.rstudio.com/web/packages/multiverse/index.html) package is a more complex solution to running multiverse analyses in R. You can find the quite extensive documentation [here](https://mucollective.github.io/multiverse/).
+
+```{r}
+
+library(multiverse)
+
+```
+We use the same dataset as before, but this time we have to follow 3 steps before we are able to visualize the results
+
+* Set up analytical data paths
+* Set up model specification(s)
+* Run models and extract results
+
+### Step 1: Define analytical data paths
+We use the built in dplyr-like scripting language that comes with the multiverse package. Using its `branch()` function we are able to set up analytical paths. In our example, we use the different operationalizations of `sentiment`, `arousal`, `complexity`, and `topics` as branches. The other control variables don't change across multiverse paths, hence we only specify one option for them. Using the `%when%`-operator we can define conditions under which certain operationalizations should be used. In our example, we us this operator define that we only want to use the LIWC based arousal measure in instances where sentiment is measured with LIWC and so on.
+
+```{r}
+ M <- multiverse()
+  
+  # Multiverse variable options
+  
+  inside(M, {
+    df <- df %>%
+      mutate(Sentiment = branch(sentiment, 
+                                "sentiment_liwc1" ~ sentiment_liwc1,
+                                "sentiment_liwc2" ~ sentiment_liwc2,
+                                "sentiment_lsd1" ~ sentiment_lsd1,
+                                "sentiment_lsd2" ~ sentiment_lsd2,
+                                "sentiment_nrc1" ~ sentiment_nrc1,
+                                "sentiment_nrc2" ~ sentiment_nrc2)
+      ) %>% 
+      mutate(Arousal = branch(arousal, 
+                              "arousal_liwc1" %when% 
+                                (sentiment %in% c("sentiment_liwc1", "sentiment_liwc2")) ~ arousal_liwc1,
+                              "arousal_lsd1" %when% 
+                                (sentiment %in% c("sentiment_lsd1", "sentiment_lsd2")) ~ arousal_lsd1,
+                              "arousal_nrc1" %when% 
+                                (sentiment %in% c("sentiment_nrc1", "sentiment_nrc2")) ~ arousal_nrc1)
+      ) %>% 
+      mutate(Complexity = branch(complexity, 
+                                 "complexity_option1" ~ complexity1,
+                                 "complexity_option2" ~ complexity2,
+                                 "complexity_option3" ~ complexity3)
+      ) %>% 
+      mutate(Topics = branch(topics, 
+                             "topics_option1" ~ topics1,
+                             "topics_option2" ~ topics2,
+                             "topics_option3" ~ topics3,
+                             "topics_option4" ~ topics4)
+      ) %>% 
+      mutate(Year = branch(year,
+                           "year_option1" ~ year1)
+      ) %>% 
+      mutate(Length = branch(length,
+                             "length_option1" ~ ntokens)
+      ) %>% 
+      mutate(Media = branch(media,
+                            "media_option1" ~ media)
+      ) 
+  })
+```
+### Step 2: Set up model specification(s)
+
+In this example we again use one OLS model, but specify it to include all control variables. You can simply add more model specifications in cases where you want to run multiple model specifictions.
+
+```{r}
+# Multiverse modelling options 
+  inside(M, {
+    
+    # M1: 
+    fit_m1 <- lm(
+      shares_log ~ Sentiment + Arousal + Complexity + 
+        Topics +
+        Media +
+        Length, 
+      data = df
+    )
+    
+  })
+  
+  # Multiverse model summaries
+  inside(M, {
+    summary_m1 <- fit_m1 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+  })
+  
+
+```
+### Step 3: Run models and extract results
+
+We can now run all analyses using the `execute_multiverse()` function:
+```{r}
+  execute_multiverse(M)
+```
+Once we have run all analysis, we can extract the relevant results summary from the Multiverse object. The result is a tibble containing estimates, standard errors, etc. for all variables used in the analysis.
+```{r}
+results_multiverse <- expand(M) %>%
+      tidylog::select(-.code) %>%
+      mutate( summary = map(.results, "summary_m1" ) ) %>% # which summary
+      unnest( cols = c(summary) ) %>% 
+      mutate(model = "OLS: all controls") 
+
+results_multiverse %>% head(10)
+```
+### Visualize results
+
+We can now use this tibble to inspect the results of the multiverse analysis. However, the package does not come with built-in visualization functions, we have to do this ourselves. 
+
+Distribution of effects of sentiment:
+```{r}
+results_multiverse %>% 
+  tidylog::filter(term == "Sentiment") %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() +
+  theme_minimal()
+
+```
+<br> Distribution of p.values:
+```{r}
+results_multiverse %>% 
+  tidylog::filter(term == "Sentiment") %>% 
+  ggplot(aes(x = p.value)) +
+  geom_histogram() +
+  theme_minimal()
+
+```
+<br> We can already see that across all specifications, the effect of sentiment on news sharing is negative and significant at p<0.05.
+
+We can also recreate the specification curve from the [specr]() package:
+
+```{r}
+
+choices <- c("sentiment", "arousal", "complexity", "topics")
+
+data_curve <- results_multiverse %>%
+    filter( term == "Sentiment" ) %>%
+    dplyr::select( .universe, choices, estimate, p.value, conf.low, conf.high) %>%
+    arrange( estimate ) %>% # sort by effect size 
+    mutate( .universe = 1:nrow(.))
+  
+  p1 <- data_curve %>%
+    ggplot() +
+    geom_point( aes(.universe, estimate, color = cut(p.value, c(0, 0.05, 1), right = FALSE))) +
+    geom_errorbar(aes(.universe, ymin = conf.low, ymax = conf.high, color = cut(p.value, c(0, 0.05, 1), right = FALSE))) +
+    geom_hline(yintercept = 0, size = 0.2, linetype = "dashed") +
+    ylim(-0.25, 0.25) +
+    labs(x = "Specifications", y = "coefficient of\nindependent variable") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  p2 <- data_curve %>%
+    gather( "parameter_name", "parameter_option", choices ) %>%
+    dplyr::select( .universe, parameter_name, parameter_option) %>%
+    ggplot() +
+    geom_point( aes(x = .universe, y = parameter_option, color = parameter_name) ) +
+    facet_grid(parameter_name ~ ., space="free_y", scales="free_y", switch="y") +
+    theme_minimal() + 
+    theme(legend.position = "none")
+  
+
+  cowplot::plot_grid(p1, p2, axis = "bltr",  align = "v", ncol = 1, rel_heights = c(3, 3)) 
+
+```
+
+
+## Option C: Coding from scratch
+
+The last option is to code the entire multiverse anlysis from scratch by looping over different iterations of the dataset. While this is probably the easiest way of doing a multiverse analysis if one does not want to get used to a new package, our example already show how cumbersome this might get.
+
+First, create a list for each higher level variable: `sentiment`, `arousal`, `complexity`, `topics`:
+```{r}
+sentiment <- list()
+sentiment[[1]] <- df$sentiment_liwc1
+sentiment[[2]] <- df$sentiment_liwc2
+sentiment[[3]] <- df$sentiment_lsd1
+sentiment[[4]] <- df$sentiment_lsd2
+sentiment[[5]] <- df$sentiment_nrc1
+sentiment[[6]] <- df$sentiment_nrc2
+
+arousal <- list()
+arousal[[1]] <- df$arousal_liwc1
+arousal[[2]] <- df$arousal_lsd1
+arousal[[3]] <- df$arousal_nrc
+
+complexity <- list()
+complexity[[1]] <- df$complexity1
+complexity[[2]] <- df$complexity2
+complexity[[3]] <- df$complexity3
+
+topics <- list()
+topics[[1]] <- df$topics1
+topics[[2]] <- df$topics2
+topics[[3]] <- df$topics3
+topics[[4]] <- df$topics4
+
+shares <- df$shares_log
+
+year <- df$year
+length <- df$length
+media <- df$media
+
+```
+Now we can loop over each instance, create a dataset, and run a model. We also implement a control sequence to make sure that we only run models that use the same dictionary for sentiment and arousal.
+```{r}
+results <- data.frame(term = character(),
+                      estimate = numeric(),
+                      std.error = numeric(),
+                      statistic = numeric(),
+                      p.value = numeric(),
+                      conf.low = numeric(),
+                      conf.high = numeric())
+
+for(i in 1:length(sentiment)){
+  for(j in 1:length(complexity)){
+    for(k in 1:length(topics)){
+      
+      df_model <- data.frame(shares = shares,
+                             sentiment = sentiment[[i]],
+                             complexity = complexity[[j]],
+                             topics = topics[[k]],
+                             year = year,
+                             length = length,
+                             media = media)
+      
+      # check which sentiment var is used and specify arousal var accordingly
+      if(i %in% c(1,2)) df_model <- df_model %>% cbind(arousal = arousal[[1]])
+      if(i %in% c(3,4)) df_model <- df_model %>% cbind(arousal = arousal[[2]])
+      if(i %in% c(5,6)) df_model <- df_model %>% cbind(arousal = arousal[[3]])
+      
+      
+       m <- lm(shares ~ sentiment + complexity + topics + 
+                 arousal + year + length + media, 
+               data = df_model) %>% 
+         broom::tidy(conf.int = TRUE, conf.level = 0.95)
+       
+       results <- results %>% rbind(m)
+    }
+  }
+}
+```
+Again we can have a look at the results table for the `sentiment` variable:
+```{r}
+results %>% 
+  tidylog::filter(term == "sentiment") %>% 
+  head(10)
+```
+We can of course also visualize the results using a specifiction curve. We first order the effects by magnitude and plot them:
+```{r}
+plot <- results %>% 
+  dplyr::filter(term == "sentiment") %>% 
+  arrange(estimate) %>% 
+  mutate(model_n = 1:n()) %>% # Sort on point estimates 
+  ggplot(aes(x = model_n, y = estimate, ymin = conf.low, ymax = conf.high)) + 
+  geom_point() + 
+  geom_errorbar() +
+  ylim(-0.2, 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal()
+plot
+```
+# Replication of [Authors 2021]()
+
+The goal is now to fully replicate the analyses presented in [Authors 2021](). We again use the sample of the full dataset to speed up the estimation of the multiverse. However, running the actual model estimation takes quite some time. Because we use two different families of statistical models (OLS and negative binomial), we split the construction and estimation of the multiverse in two: We first implement everything using OLS models and logged dependent variables, and then move on to use negative bionomial models using the original count data of the dependent variables. 
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(multiverse)
+```
+
+
+## 1. OLS Models
+
+```{r}
+df <- read_rds("data/dataset_sample.rds")
+
+# DEFINE VARIABLES OF MULTIVERSE
+# ==============================================================================
+defineMultiverseData <- function(data){
+  
+  M <- multiverse()
+  
+  # Multiverse variable options
+  
+  inside(M, {
+    df <- data %>%
+      mutate(Y = branch(y,
+                        "y_shares" ~ shares_log,
+                        "y_comments" ~ comments_log,
+                        "y_emojis" ~ emoji_react_log,
+                        "y_likes" ~ likes_log)
+      ) %>% 
+      mutate(Sentiment = branch(sentiment, 
+                                "sentiment_liwc1" ~ scale(sentiment_liwc1),
+                                "sentiment_liwc2" ~ scale(sentiment_liwc2),
+                                "sentiment_lsd1" ~ scale(sentiment_lsd1),
+                                "sentiment_lsd2" ~ scale(sentiment_lsd2),
+                                "sentiment_nrc1" ~ scale(sentiment_nrc1),
+                                "sentiment_nrc2" ~ scale(sentiment_nrc2))
+      ) %>% 
+      mutate(Arousal = branch(arousal, 
+                              "arousal_liwc1" %when% (sentiment %in% c("sentiment_liwc1", "sentiment_liwc2")) ~ scale(arousal_liwc1),
+                              "arousal_lsd1" %when% (sentiment %in% c("sentiment_lsd1", "sentiment_lsd2")) ~ scale(arousal_lsd1),
+                              "arousal_nrc1" %when% (sentiment %in% c("sentiment_nrc1", "sentiment_nrc2")) ~ scale(arousal_nrc1))
+      ) %>% 
+      mutate(Complexity = branch(complexity, 
+                                 "complexity_option1" ~ scale(log(complexity1)),
+                                 "complexity_option2" ~ scale(log(complexity2)),
+                                 "complexity_option3" ~ scale(log(complexity3)))
+      ) %>% 
+      mutate(Topics = branch(topics, 
+                             "topics_option1" ~ topics1,
+                             "topics_option2" ~ topics2,
+                             "topics_option3" ~ topics3,
+                             "topics_option4" ~ topics4)
+      ) %>% 
+      mutate(Year = branch(year,
+                           "year_option1" ~ as.factor(year1))
+      ) %>% 
+      mutate(Month = branch(month,
+                            "month_option1" ~ as.factor(month1))
+      ) %>% 
+      mutate(Day = branch(day,
+                          "day_option1" ~ as.factor(day1))
+      ) %>% 
+      mutate(Time_of_day = branch(time_of_day,
+                                  "time_of_day_option1" ~ as.factor(time_of_day1))
+      ) %>% 
+      mutate(Length = branch(length,
+                             "length_option1" ~ log(ntokens))
+      ) %>% 
+      mutate(Media = branch(media,
+                            "media_option1" ~ as.factor(media))
+      ) 
+  })
+  
+  return(M)
+}
+
+# DEFINE LINEAR MODELS OF MULTIVERSE
+# ==============================================================================
+defineMultiverseModels <- function(M){
+  
+  
+  # Multiverse modelling options 
+  inside(M, {
+    
+    # M1: 
+    fit_m1 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics +
+        Media, 
+      data = df
+    )
+    
+    # M2: 
+    fit_m2 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Year +
+        Media, 
+      data = df
+    )
+    
+    # M3: 
+    fit_m3 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length +
+        Media, 
+      data = df
+    )
+    
+    # M4: 
+    fit_m4 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year +
+        Media, 
+      data = df
+    )
+    
+    # M5: 
+    fit_m5 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year + Time_of_day +
+        Media, 
+      data = df
+    )
+    
+    # M6: 
+    fit_m6 <- lm(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year + Month + Day + Time_of_day +
+        Media, 
+      data = df
+    )
+    
+    
+    
+    
+    
+    
+  })
+  
+  # Multiverse model summaries
+  inside(M, {
+    summary_m1 <- fit_m1 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+    summary_m2 <- fit_m2 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+    summary_m3 <- fit_m3 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+    summary_m4 <- fit_m4 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+    summary_m5 <- fit_m5 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+    summary_m6 <- fit_m6 %>% 
+      broom::tidy(conf.int = TRUE, conf.level = 0.95)
+    
+  })
+  
+  return(M)
+}
+
+
+
+
+# RUN MULTIVERSE
+# ==============================================================================
+fitMultiverse <- function(M){
+  execute_multiverse(M)
+  return(M)
+}
+
+# GET MULTIVERSE MODEL RESULTS
+# ==============================================================================
+getMultiverseResults<- function(M){
+  
+  summary_names <- c("summary_m1",
+                     "summary_m2",
+                     "summary_m3",
+                     "summary_m4",
+                     "summary_m5",
+                     "summary_m6")
+  model_names <- c("m1: Controls: Media + Topics  ",
+                   "m2: Controls: Media + Topics + Year",
+                   "m3: Controls: Media + Topics + Length",
+                   "m4: Controls: Media + Topics + Length + Year",
+                   "m5: Controls: Media + Topics + Length + Year + Time of day",
+                   "m6: Controls: Media + Topics + Length + Year + Month + Day + Time of day")
+  
+  for(i in 1:length(summary_names)){
+    temp <- multiverse::expand(M) %>%
+      tidylog::select(-.code) %>%
+      mutate( summary = map(.results, summary_names[i] ) ) %>% # which summary
+      unnest( cols = c(summary) ) %>% 
+      mutate(model = model_names[i]) # set model name
+    
+    if(i == 1){
+      results <- temp
+    } 
+    else{
+      results <- rbind(results, temp)
+    }
+  }
+  
+  # rename p-value
+  results %<>% 
+    dplyr::rename(p = p.value)
+  
+  # drop the actual model output (otherwise several GB to be saved), just save coefficients
+  results %<>%
+    tidylog::select(-.results)
+  
+  return(results)
+}
+
+
+MultiverseAnalysis <- function(data){
+  results <- data %>% 
+    defineMultiverseData() %>% 
+    defineMultiverseModels() %>% 
+    fitMultiverse() %>% 
+    getMultiverseResults()
+}
+
+
+
+
+# RUN MULTIVERSE ANALYSIS OLS MODELS
+##############################################################################
+
+system.time({
+  
+  results_lm1 <- df %>% 
+    MultiverseAnalysis() %>% 
+    tidylog::mutate(model_family = "OLS",
+                    min_length = "no")
+  
+  
+  
+  results_lm2 <- df %>% 
+    tidylog::filter(min_length1 == 1) %>% 
+    MultiverseAnalysis() %>% 
+    tidylog::mutate(model_family = "OLS",
+                    min_length = "yes")
+  
+})
+
+results_ols <- rbind(results_lm1,
+                     results_lm2)
+
+write_rds(results_ols, file = "data/results_ols.rds", compress = "xz")
+```
+
+## 2. Negative Binomial Models
+```{r}
+library(MASS)
+df <- read_rds("data/dataset_sample.rds")
+
+# DEFINE VARIABLES OF MULTIVERSE
+################################################################################
+defineMultiverseData <- function(data){
+  
+  M <- multiverse()
+  
+  # Multiverse variable options
+  
+  inside(M, {
+    df <- data %>%
+      mutate(Y = branch(y,
+                        "y_shares" ~ shares,
+                        "y_comments" ~ comments,
+                        "y_emojis" ~ emoji_react,
+                        "y_likes" ~ likes)
+      ) %>% 
+      mutate(Sentiment = branch(sentiment, 
+                                "sentiment_liwc1" ~ scale(sentiment_liwc1),
+                                "sentiment_liwc2" ~ scale(sentiment_liwc2),
+                                "sentiment_lsd1" ~ scale(sentiment_lsd1),
+                                "sentiment_lsd2" ~ scale(sentiment_lsd2),
+                                "sentiment_nrc1" ~ scale(sentiment_nrc1),
+                                "sentiment_nrc2" ~ scale(sentiment_nrc2))
+      ) %>% 
+      mutate(Arousal = branch(arousal, 
+                              "arousal_liwc1" %when% (sentiment %in% c("sentiment_liwc1", "sentiment_liwc2")) ~ scale(arousal_liwc1),
+                              "arousal_lsd1" %when% (sentiment %in% c("sentiment_lsd1", "sentiment_lsd2")) ~ scale(arousal_lsd1),
+                              "arousal_nrc1" %when% (sentiment %in% c("sentiment_nrc1", "sentiment_nrc2")) ~ scale(arousal_nrc1))
+      ) %>% 
+      mutate(Complexity = branch(complexity, 
+                                 "complexity_option1" ~ scale(log(complexity1)),
+                                 "complexity_option2" ~ scale(log(complexity2)),
+                                 "complexity_option3" ~ scale(log(complexity3)))
+      ) %>% 
+      mutate(Topics = branch(topics, 
+                             "topics_option1" ~ topics1,
+                             "topics_option2" ~ topics2,
+                             "topics_option3" ~ topics3,
+                             "topics_option4" ~ topics4)
+      ) %>% 
+      mutate(Year = branch(year,
+                           "year_option1" ~ as.factor(year1))
+      ) %>% 
+      mutate(Month = branch(month,
+                            "month_option1" ~ as.factor(month1))
+      ) %>% 
+      mutate(Day = branch(day,
+                          "day_option1" ~ as.factor(day1))
+      ) %>% 
+      mutate(Time_of_day = branch(time_of_day,
+                                  "time_of_day_option1" ~ as.factor(time_of_day1))
+      ) %>% 
+      mutate(Length = branch(length,
+                             "length_option1" ~ log(ntokens))
+      ) %>% 
+      mutate(Media = branch(media,
+                            "media_option1" ~ as.factor(media))
+      ) 
+  })
+  
+  return(M)
+}
+
+
+# DEFINE NEGATIVE BINOMIAL MODELS OF MULTIVERSE
+################################################################################
+defineMultiverseModels <- function(M){
+  
+  # Multiverse modelling options 
+  inside(M, {
+    
+    
+    # M1: 
+    fit_m1 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+    # M2: 
+    fit_m2 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Year +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+    # M3: 
+    fit_m3 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+    # M4: 
+    fit_m4 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+    # M5: 
+    fit_m5 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year + Time_of_day +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+    # M6: 
+    fit_m6 <- glm.nb(
+      Y ~ Sentiment + Arousal + Complexity + 
+        Topics + Length + Year + Month + Day + Time_of_day +
+        Media, 
+      data = df,
+      control = glm.control(maxit = 50)
+    )
+    
+  })
+  
+  
+  # Multiverse model summaries with Wald CIs (don't use regular CIs unless you want to wait for 278932743 years)
+  inside(M, {
+    summary_m1 <- cbind(broom::tidy(fit_m1), broom::confint_tidy(fit_m1, conf.level = 0.95, func = stats::confint.default))
+    
+    summary_m2 <- cbind(broom::tidy(fit_m2), broom::confint_tidy(fit_m2, conf.level = 0.95, func = stats::confint.default))
+    
+    summary_m3 <- cbind(broom::tidy(fit_m3), broom::confint_tidy(fit_m3, conf.level = 0.95, func = stats::confint.default))
+    
+    summary_m4 <- cbind(broom::tidy(fit_m4), broom::confint_tidy(fit_m4, conf.level = 0.95, func = stats::confint.default))
+    
+    summary_m5 <- cbind(broom::tidy(fit_m5), broom::confint_tidy(fit_m5, conf.level = 0.95, func = stats::confint.default))
+    
+    summary_m6 <- cbind(broom::tidy(fit_m6), broom::confint_tidy(fit_m6, conf.level = 0.95, func = stats::confint.default))
+    
+  })
+  
+  return(M)
+}
+
+
+
+
+# RUN MULTIVERSE
+##############################################################################
+fitMultiverse <- function(M){
+  execute_multiverse(M)
+  return(M)
+}
+
+# GET MULTIVERSE MODEL RESULTS
+##############################################################################
+getMultiverseResults<- function(M){
+  
+  summary_names <- c("summary_m1",
+                     "summary_m2",
+                     "summary_m3",
+                     "summary_m4",
+                     "summary_m5",
+                     "summary_m6")
+  model_names <- c("m1: Controls: Media + Topics  ",
+                   "m2: Controls: Media + Topics + Year",
+                   "m3: Controls: Media + Topics + Length",
+                   "m4: Controls: Media + Topics + Length + Year",
+                   "m5: Controls: Media + Topics + Length + Year + Time of day",
+                   "m6: Controls: Media + Topics + Length + Year + Month + Day + Time of day")
+  
+  for(i in 1:length(summary_names)){
+    temp <- multiverse::expand(M) %>%
+      tidylog::select(-.code) %>%
+      mutate( summary = map(.results, summary_names[i] ) ) %>% # which summary
+      unnest( cols = c(summary) ) %>% 
+      mutate(model = model_names[i]) # set model name
+    
+    if(i == 1){
+      results <- temp
+    } 
+    else{
+      results <- rbind(results, temp)
+    }
+  }
+  
+  # rename p-value
+  results %<>% 
+    dplyr::rename(p = p.value)
+  
+  # drop the actual model output (otherwise several GB to be saved), just save coefficients
+  results %<>%
+    tidylog::select(-.results)
+  
+  return(results)
+}
+
+
+MultiverseAnalysis <- function(data){
+  results <- data %>% 
+    defineMultiverseData() %>% 
+    defineMultiverseModels() %>% 
+    fitMultiverse() %>% 
+    getMultiverseResults()
+}
+
+
+
+# RUN MULTIVERSE ANALYSIS NEGATIVE BINOMIAL MODELS 
+##############################################################################
+
+system.time({
+  
+  results_nb1 <- df %>% 
+    MultiverseAnalysis() %>%                    # Warnings are about the use of broom::confint_tidy() being depreciated. 
+    tidylog::mutate(model_family = "GLM: NB",   # Can be implemented differently if desired
+                    min_length = "no")
+  
+  
+  results_nb2 <- df %>% 
+    tidylog::filter(min_length1 == 1) %>%       # Warnings are about the use of broom::confint_tidy() being depreciated. 
+    MultiverseAnalysis() %>% 
+    tidylog::mutate(model_family = "GLM: NB",
+                    min_length = "yes")
+  
+})
+
+results_nb <- rbind(results_nb1,
+                    results_nb2)
+
+write_rds(results_nb, file = "data/model results/results_nb.rds", compress = "xz")
+```
+
+
+
+
+
+
+
+
